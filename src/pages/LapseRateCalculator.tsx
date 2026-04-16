@@ -15,6 +15,12 @@ import {
 
 function cToF(c: number) { return c * 9 / 5 + 32; }
 function lrToF(lrCperKm: number) { return lrCperKm * 1.8 / FT_PER_METER; }
+function kmhToMph(kmh: number) { return kmh * 0.621371; }
+function roundToNearest500(value: number) { return Math.round(value / 500) * 500; }
+function cardinalFromDegrees(deg: number) {
+  const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  return dirs[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+}
 
 // ─── GPS helper ────────────────────────────────────────────────────────────────
 
@@ -352,6 +358,7 @@ if (primaryForecast) {
   const lrUnit = fahrenheit ? "°F/1000ft" : "°C/km";
   const displayTemp = (c: number) => fahrenheit ? cToF(c).toFixed(1) : c.toFixed(1);
   const displayLr = (lrKm: number) => (fahrenheit ? lrToF(lrKm) : lrKm).toFixed(2);
+  const displayWind = (speed: number, direction: number) => `${Math.round(kmhToMph(speed))} mph ${cardinalFromDegrees(direction)} (${Math.round(direction)}°)`;
 
   const hasAnyForecast = Object.keys(forecasts).length > 0;
   const elevation = primaryForecast?.elevation ?? 0;
@@ -599,9 +606,8 @@ if (primaryForecast) {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border/40 text-xs text-muted-foreground">
-                        <th className="text-left px-5 py-2 font-medium">From</th>
-                        <th className="text-left px-4 py-2 font-medium">To</th>
-                        <th className="text-right px-4 py-2 font-medium">Mid-Height</th>
+                        <th className="text-left px-5 py-2 font-medium">Layer</th>
+                        <th className="text-left px-4 py-2 font-medium">Wind</th>
                         <th className="text-right px-4 py-2 font-medium">{lrUnit}</th>
                         <th className="text-right px-5 py-2 font-medium hidden sm:table-cell">{fahrenheit ? "°C/km" : "°C/1000ft"}</th>
                         <th className="text-right px-5 py-2 font-medium">Category</th>
@@ -611,25 +617,25 @@ if (primaryForecast) {
                       {[
                         currentEntry.lapseRates[0]
                           ? {
-                              from: "Surface (2m)",
-                              to: `${currentEntry.layers[0]?.level ?? "—"} hPa`,
+                              layer: "Surface",
+                              wind: currentEntry.layers[0] ? displayWind(currentEntry.layers[0].windSpeed, currentEntry.layers[0].windDirection) : "—",
                               lrKm: currentEntry.lapseRates[0].lapseRateCperKm,
-                              midHt: `${Math.round(currentEntry.lapseRates[0].midHeightFt).toLocaleString()} ft`,
                             }
                           : null,
-                        ...currentEntry.lapseRates.slice(1).map((lr) => ({
-                          from: `${lr.fromLevel} hPa`,
-                          to: `${lr.toLevel} hPa`,
-                          lrKm: lr.lapseRateCperKm,
-                          midHt: `${Math.round(lr.midHeightFt).toLocaleString()} ft`,
-                        })),
-                      ].filter(Boolean).map((row, i) => {
+                        ...currentEntry.lapseRates.slice(1).map((lr, idx) => {
+                          const upperLayer = currentEntry.layers[idx + 1];
+                          return {
+                            layer: `${roundToNearest500(lr.midHeightFt).toLocaleString()} ft`,
+                            wind: upperLayer ? displayWind(upperLayer.windSpeed, upperLayer.windDirection) : "—",
+                            lrKm: lr.lapseRateCperKm,
+                          };
+                        }),
+                      ].filter(Boolean).reverse().map((row, i) => {
                         const cat = categorizeLapseRate(row!.lrKm);
                         return (
                           <tr key={i} className="border-b border-border/20 last:border-0 hover:bg-muted/30 transition-colors">
-                            <td className="px-5 py-2.5 text-muted-foreground">{row!.from}</td>
-                            <td className="px-4 py-2.5 text-muted-foreground">{row!.to}</td>
-                            <td className="px-4 py-2.5 text-right tabular-nums">{row!.midHt}</td>
+                            <td className="px-5 py-2.5 text-muted-foreground">{row!.layer}</td>
+                            <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">{row!.wind}</td>
                             <td className="px-4 py-2.5 text-right tabular-nums font-medium">{displayLr(row!.lrKm)}</td>
                             <td className="px-5 py-2.5 text-right tabular-nums text-muted-foreground hidden sm:table-cell">{fahrenheit ? row!.lrKm.toFixed(2) : (row!.lrKm / FT_PER_METER).toFixed(2)}</td>
                             <td className="px-5 py-2.5 text-right">

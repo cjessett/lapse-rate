@@ -29,6 +29,8 @@ export interface PressureLevelData {
   level: PressureLevel;
   temperature: number; // °C
   geopotentialHeight: number; // meters
+  windSpeed: number; // km/h
+  windDirection: number; // degrees
 }
 
 export interface LapseRateResult {
@@ -60,10 +62,12 @@ export interface ForecastResult {
 function buildApiUrl(latitude: number, longitude: number, model: ModelKey): string {
   const tempVars = PRESSURE_LEVELS.map((l) => `temperature_${l}hPa`).join(",");
   const heightVars = PRESSURE_LEVELS.map((l) => `geopotential_height_${l}hPa`).join(",");
+  const windSpeedVars = PRESSURE_LEVELS.map((l) => `wind_speed_${l}hPa`).join(",");
+  const windDirectionVars = PRESSURE_LEVELS.map((l) => `wind_direction_${l}hPa`).join(",");
   const params = new URLSearchParams({
     latitude: latitude.toString(),
     longitude: longitude.toString(),
-    hourly: `temperature_2m,${tempVars},${heightVars}`,
+    hourly: `temperature_2m,${tempVars},${heightVars},${windSpeedVars},${windDirectionVars}`,
     forecast_days: "3",
     timezone: "auto",
     temperature_unit: "celsius",
@@ -89,10 +93,14 @@ export async function fetchForecast(
 
   const levelTemps: Record<PressureLevel, number[]> = {} as Record<PressureLevel, number[]>;
   const levelHeights: Record<PressureLevel, number[]> = {} as Record<PressureLevel, number[]>;
+  const levelWindSpeeds: Record<PressureLevel, number[]> = {} as Record<PressureLevel, number[]>;
+  const levelWindDirections: Record<PressureLevel, number[]> = {} as Record<PressureLevel, number[]>;
 
   for (const level of PRESSURE_LEVELS) {
     levelTemps[level] = data.hourly[`temperature_${level}hPa`];
     levelHeights[level] = data.hourly[`geopotential_height_${level}hPa`];
+    levelWindSpeeds[level] = data.hourly[`wind_speed_${level}hPa`];
+    levelWindDirections[level] = data.hourly[`wind_direction_${level}hPa`];
   }
 
   const hourlyData: LapseRateResult[] = hourlyTime.map((time, i) => {
@@ -100,8 +108,10 @@ export async function fetchForecast(
     for (const level of PRESSURE_LEVELS) {
       const height = levelHeights[level][i];
       const temp = levelTemps[level][i];
-      if (height != null && temp != null && height <= MAX_HEIGHT_M) {
-        layers.push({ level, temperature: temp, geopotentialHeight: height });
+      const windSpeed = levelWindSpeeds[level][i];
+      const windDirection = levelWindDirections[level][i];
+      if (height != null && temp != null && windSpeed != null && windDirection != null && height <= MAX_HEIGHT_M) {
+        layers.push({ level, temperature: temp, geopotentialHeight: height, windSpeed, windDirection });
       }
     }
     layers.sort((a, b) => a.geopotentialHeight - b.geopotentialHeight);

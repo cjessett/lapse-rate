@@ -1,9 +1,9 @@
 
-export const PRESSURE_LEVELS = [1000, 975, 950, 925, 900, 875, 850] as const;
+export const PRESSURE_LEVELS = [1000, 975, 950, 925, 900, 875, 850, 800] as const;
 export type PressureLevel = (typeof PRESSURE_LEVELS)[number];
 
 export const FT_PER_METER = 3.28084;
-export const MAX_HEIGHT_M = 1524; // 5000 ft in meters
+export const MAX_HEIGHT_M = 3000;
 
 // ─── model config ──────────────────────────────────────────────────────────────
 

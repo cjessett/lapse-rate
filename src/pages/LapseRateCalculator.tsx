@@ -3,7 +3,7 @@ import { useState, useCallback, useRef } from "react";
 import {
   LineChart, Line, ScatterChart, Scatter,
   XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, Legend,
+  ResponsiveContainer, ReferenceLine, Legend, Customized,
 } from "recharts";
 import {
   fetchForecast, geocodeLocation, categorizeLapseRate, formatLocalTime,
@@ -16,10 +16,120 @@ import {
 function cToF(c: number) { return c * 9 / 5 + 32; }
 function lrToF(lrCperKm: number) { return lrCperKm * 1.8 / FT_PER_METER; }
 function kmhToMph(kmh: number) { return kmh * 0.621371; }
+function kmhToKnots(kmh: number) { return kmh * 0.539957; }
 function roundToNearest500(value: number) { return Math.round(value / 500) * 500; }
 function cardinalFromDegrees(deg: number) {
   const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
   return dirs[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+}
+
+function WindBarb({
+  x,
+  y,
+  speedKmh,
+  directionDeg,
+  color,
+}: {
+  x: number;
+  y: number;
+  speedKmh: number;
+  directionDeg: number;
+  color: string;
+}) {
+  const speedKt = Math.max(0, kmhToKnots(speedKmh));
+  let remaining = Math.round(speedKt / 5) * 5;
+  const shaftLength = 22;
+  const step = 4;
+  const barbLength = 10;
+  const children: JSX.Element[] = [
+    <line key="shaft" x1="0" y1="0" x2="0" y2={-shaftLength} stroke={color} strokeWidth="1.5" strokeLinecap="round" />,
+  ];
+
+  let cursor = -shaftLength;
+  let key = 0;
+
+  while (remaining >= 50) {
+    children.push(
+      <polygon
+        key={`flag-${key++}`}
+        points={`0,${cursor} 10,${cursor + 3} 0,${cursor + 6}`}
+        fill={color}
+      />,
+    );
+    remaining -= 50;
+    cursor += 6;
+  }
+
+  while (remaining >= 10) {
+    children.push(
+      <line
+        key={`full-${key++}`}
+        x1="0"
+        y1={cursor}
+        x2={barbLength}
+        y2={cursor - 4}
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />,
+    );
+    remaining -= 10;
+    cursor += step;
+  }
+
+  if (remaining >= 5) {
+    children.push(
+      <line
+        key={`half-${key++}`}
+        x1="0"
+        y1={cursor}
+        x2={barbLength * 0.6}
+        y2={cursor - 2.5}
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />,
+    );
+  }
+
+  return (
+    <g transform={`translate(${x}, ${y}) rotate(${directionDeg})`}>
+      {children}
+    </g>
+  );
+}
+
+interface WindBarbLayerProps {
+  offset?: { left: number; top: number; width: number; height: number };
+  yAxisMap?: Record<string | number, { scale: (value: number) => number }>;
+  points: ProfilePoint[];
+  color: string;
+  xOffset?: number;
+}
+
+function WindBarbLayer({ offset, yAxisMap, points, color, xOffset = 0 }: WindBarbLayerProps) {
+  if (!offset || !yAxisMap) return null;
+  const firstYAxis = Object.values(yAxisMap)[0];
+  if (!firstYAxis) return null;
+  const x = offset.left + offset.width - 14 + xOffset;
+  const yLift = 15
+
+  return (
+    <g>
+      {points
+        .filter((point) => point.windSpeed != null && point.windDirection != null)
+        .map((point) => (
+          <WindBarb
+            key={`${point.label}-${point.heightFt}`}
+            x={x}
+            y={firstYAxis.scale(point.heightFt) - yLift}
+            speedKmh={point.windSpeed!}
+            directionDeg={point.windDirection!}
+            color={color}
+          />
+        ))}
+    </g>
+  );
 }
 
 // ─── GPS helper ────────────────────────────────────────────────────────────────
@@ -69,7 +179,13 @@ function LapseRateGauge({ lrKm, fahrenheit }: { lrKm: number; fahrenheit: boolea
   );
 }
 
-interface ProfilePoint { heightFt: number; temp: number; label: string; }
+interface ProfilePoint {
+  heightFt: number;
+  temp: number;
+  label: string;
+  windSpeed?: number;
+  windDirection?: number;
+}
 
 function TemperatureProfileChart({
   forecasts, selectedModels, selectedHourIndex, elevationM, fahrenheit,
@@ -93,11 +209,17 @@ function TemperatureProfileChart({
           heightFt: Math.round(l.geopotentialHeight * FT_PER_METER),
           temp: convert(l.temperature),
           label: `${l.level} hPa`,
+          windSpeed: l.windSpeed,
+          windDirection: l.windDirection,
         })),
       ].sort((a, b) => a.heightFt - b.heightFt);
       return { model, points: pts };
     })
     .filter((x): x is { model: ModelKey; points: ProfilePoint[] } => x !== null);
+
+  const allTemps = modelPoints.flatMap(({ points }) => points.map((point) => point.temp));
+  const warmEdge = allTemps.length > 0 ? Math.max(...allTemps) : undefined;
+  const xDomain: [number | "auto", number | "auto"] = ["auto", warmEdge != null ? warmEdge + 6 : "auto"];
 
   const freezingX = fahrenheit ? 32 : 0;
 
@@ -107,7 +229,10 @@ function TemperatureProfileChart({
       <div className="rounded-lg border border-border bg-card p-2 text-xs shadow-lg space-y-1">
         <p className="font-semibold text-foreground mb-1">{payload[0].payload.heightFt.toLocaleString()} ft MSL</p>
         {payload.map((p, i) => (
-          <p key={i} style={{ color: p.fill }}>{p.payload.label}: {p.payload.temp}{unit}</p>
+          <p key={i} style={{ color: p.fill }}>
+            {p.payload.label}: {p.payload.temp}{unit}
+            {p.payload.windSpeed != null && p.payload.windDirection != null ? ` · ${Math.round(kmhToMph(p.payload.windSpeed))} mph ${cardinalFromDegrees(p.payload.windDirection)}` : ""}
+          </p>
         ))}
       </div>
     );
@@ -121,7 +246,7 @@ function TemperatureProfileChart({
           type="number"
           dataKey="temp"
           name="Temperature"
-          domain={["auto", "auto"]}
+          domain={xDomain}
           tickFormatter={(v) => `${v}${unit}`}
           tick={{ fontSize: 11 }}
           stroke="hsl(var(--muted-foreground))"
@@ -154,6 +279,12 @@ function TemperatureProfileChart({
             fill={MODEL_COLORS[model]}
             line={{ stroke: MODEL_COLORS[model], strokeWidth: 2.5 }}
             lineType="joint"
+          />
+        ))}
+        {modelPoints.map(({ model, points }, index) => (
+          <Customized
+            key={`${model}-wind-barbs`}
+            component={<WindBarbLayer points={points} color={MODEL_COLORS[model]} xOffset={-index * 14} />}
           />
         ))}
       </ScatterChart>

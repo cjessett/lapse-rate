@@ -322,7 +322,7 @@ export default function LapseRateCalculator() {
   const currentEntry = primaryForecast?.hourlyData[selectedHourIndex];
 
   // Build day-group headers and clickable time marks from daylightIndices
-const KEY_HOURS = [8, 10, 12, 14, 16, 18];
+const KEY_HOURS = [8, 10, 12, 14, 16];
 const todayStr = new Date().toLocaleDateString().substring(0, 10);
 const dayGroups: { date: string; label: string; startPos: number; count: number }[] = [];
 const timeMarks: { sliderPos: number; label: string }[] = [];

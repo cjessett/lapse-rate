@@ -1,5 +1,6 @@
 
 import { useState, useCallback, useRef } from "react";
+import { ChevronDown, LocateFixed } from "lucide-react";
 import {
   LineChart, Line, ScatterChart, Scatter,
   XAxis, YAxis, CartesianGrid, Tooltip,
@@ -216,6 +217,7 @@ export default function LapseRateCalculator() {
   const [geoResults, setGeoResults] = useState<GeoResult[]>([]);
   const [coordsFromQuery, setCoordsFromQuery] = useState<{ lat: number; lon: number } | null>(null);
   const [currentLocation, setCurrentLocation] = useState<{ name: string; lat: number; lon: number } | null>(null);
+  const [isLocationSearchOpen, setIsLocationSearchOpen] = useState(true);
   const [selectedModels, setSelectedModels] = useState<Set<ModelKey>>(new Set([DEFAULT_MODEL]));
   const [forecasts, setForecasts] = useState<Partial<Record<ModelKey, ForecastResult>>>({});
   const [loadingModels, setLoadingModels] = useState<Set<ModelKey>>(new Set());
@@ -249,6 +251,7 @@ export default function LapseRateCalculator() {
     setModelErrors({});
     setCurrentLocation({ name, lat, lon });
     setQuery(displayQuery);
+    setIsLocationSearchOpen(false);
     setSliderPos(4);
     // Fetch all currently selected models in parallel
     const models = Array.from(selectedModels);
@@ -314,7 +317,7 @@ export default function LapseRateCalculator() {
   const daylightIndices: number[] = primaryForecast
     ? primaryForecast.hourlyData.reduce<number[]>((acc, d, i) => {
         const h = parseInt(d.time.substring(11, 13), 10);
-        if (h >= 8 && h <= 19) acc.push(i);
+        if (h >= 8 && h <= 17) acc.push(i);
         return acc;
       }, [])
     : [];
@@ -374,86 +377,115 @@ if (primaryForecast) {
 
       <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
         {/* Location + Model Selection */}
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-4">
-          <div>
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Location</h2>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(e) => handleQueryChange(e.target.value)}
-                  onFocus={() => (geoResults.length > 0 || coordsFromQuery) && setShowDropdown(true)}
-                  onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
-                  placeholder="City name or lat, lon (e.g. 34.448, -119.293)…"
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                {geocoding && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">…</span>}
-                {showDropdown && (coordsFromQuery || geoResults.length > 0) && (
-                  <ul className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
-                    {coordsFromQuery && (
-                      <li
-                        onMouseDown={() => loadLocation(coordsFromQuery.lat, coordsFromQuery.lon, `${coordsFromQuery.lat.toFixed(4)}, ${coordsFromQuery.lon.toFixed(4)}`, `${coordsFromQuery.lat.toFixed(4)}, ${coordsFromQuery.lon.toFixed(4)}`)}
-                        className="px-3 py-2.5 text-sm cursor-pointer hover:bg-accent transition-colors flex items-center gap-2"
-                      >
-                        <span className="text-primary font-mono text-xs bg-primary/10 px-1.5 py-0.5 rounded">GPS</span>
-                        <span><span className="font-medium">{coordsFromQuery.lat.toFixed(4)}</span><span className="text-muted-foreground">, </span><span className="font-medium">{coordsFromQuery.lon.toFixed(4)}</span></span>
-                      </li>
-                    )}
-                    {geoResults.map((r, i) => (
-                      <li key={i} onMouseDown={() => loadLocation(r.latitude, r.longitude, r.name, `${r.name}${r.admin1 ? `, ${r.admin1}` : ""}, ${r.country}`)} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent transition-colors">
-                        <span className="font-medium">{r.name}</span>
-                        {r.admin1 && <span className="text-muted-foreground">, {r.admin1}</span>}
-                        <span className="text-muted-foreground">, {r.country}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              <button onClick={handleUseMyLocation} className="flex-shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-accent transition-colors" title="Use my location">📍 My Location</button>
-            </div>
-            <div>
-              <button onClick={handleUseSB} className="mt-2 flex-shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-accent transition-colors" title="Santa Barbara">🪂 Santa Barbara</button>
-            </div>
-            {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Location + Models</span>
+            <button
+              type="button"
+              onClick={() => setIsLocationSearchOpen((prev) => !prev)}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background hover:bg-accent transition-colors"
+              title={isLocationSearchOpen ? "Collapse location controls" : "Expand location controls"}
+              aria-label={isLocationSearchOpen ? "Collapse location controls" : "Expand location controls"}
+            >
+              <ChevronDown className={`h-4 w-4 transition-transform ${isLocationSearchOpen ? "rotate-180" : ""}`} />
+            </button>
           </div>
 
-          {/* Model checkboxes */}
-          <div>
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">Forecast Models</h2>
-            <div className="flex flex-wrap gap-3">
-              {(Object.entries(MODELS) as [ModelKey, { label: string; shortLabel: string }][]).map(([key, cfg]) => {
-                const checked = selectedModels.has(key);
-                const loading = loadingModels.has(key);
-                const hasError = !!modelErrors[key];
-                return (
-                  <label
-                    key={key}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors select-none ${checked ? "border-transparent" : "border-border bg-background hover:bg-accent"}`}
-                    style={checked ? { background: MODEL_COLORS[key] + "18", borderColor: MODEL_COLORS[key] + "66" } : {}}
-                  >
+          <div
+            className={`grid overflow-hidden transition-all duration-300 ease-in-out ${
+              currentLocation && !isLocationSearchOpen
+                ? "grid-rows-[0fr] opacity-0 mt-0"
+                : "grid-rows-[1fr] opacity-100 mt-4"
+            }`}
+            aria-hidden={currentLocation && !isLocationSearchOpen}
+          >
+            <div className="min-h-0">
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
                     <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => toggleModel(key, e.target.checked)}
-                      className="sr-only"
+                      type="text"
+                      value={query}
+                      onChange={(e) => handleQueryChange(e.target.value)}
+                      onFocus={() => (geoResults.length > 0 || coordsFromQuery) && setShowDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
+                      placeholder="City name or lat, lon (e.g. 34.448, -119.293)…"
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                     />
-                    <span
-                      className="w-3 h-3 rounded-sm border-2 flex items-center justify-center flex-shrink-0"
-                      style={{ borderColor: MODEL_COLORS[key], background: checked ? MODEL_COLORS[key] : "transparent" }}
-                    >
-                      {checked && <svg className="w-2 h-2 text-white" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                    </span>
-                    <span className="text-sm font-medium" style={checked ? { color: MODEL_COLORS[key] } : {}}>{cfg.label}</span>
-                    {loading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin opacity-60" style={{ color: MODEL_COLORS[key] }} />}
-                    {hasError && <span className="text-destructive text-xs">!</span>}
-                  </label>
-                );
-              })}
+                    {geocoding && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">…</span>}
+                    {showDropdown && (coordsFromQuery || geoResults.length > 0) && (
+                      <ul className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+                        {coordsFromQuery && (
+                          <li
+                            onMouseDown={() => loadLocation(coordsFromQuery.lat, coordsFromQuery.lon, `${coordsFromQuery.lat.toFixed(4)}, ${coordsFromQuery.lon.toFixed(4)}`, `${coordsFromQuery.lat.toFixed(4)}, ${coordsFromQuery.lon.toFixed(4)}`)}
+                            className="px-3 py-2.5 text-sm cursor-pointer hover:bg-accent transition-colors flex items-center gap-2"
+                          >
+                            <span className="text-primary font-mono text-xs bg-primary/10 px-1.5 py-0.5 rounded">GPS</span>
+                            <span><span className="font-medium">{coordsFromQuery.lat.toFixed(4)}</span><span className="text-muted-foreground">, </span><span className="font-medium">{coordsFromQuery.lon.toFixed(4)}</span></span>
+                          </li>
+                        )}
+                        {geoResults.map((r, i) => (
+                          <li key={i} onMouseDown={() => loadLocation(r.latitude, r.longitude, r.name, `${r.name}${r.admin1 ? `, ${r.admin1}` : ""}, ${r.country}`)} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent transition-colors">
+                            <span className="font-medium">{r.name}</span>
+                            {r.admin1 && <span className="text-muted-foreground">, {r.admin1}</span>}
+                            <span className="text-muted-foreground">, {r.country}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleUseMyLocation}
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-border bg-background hover:bg-accent transition-colors"
+                    title="Use my location"
+                    aria-label="Use my location"
+                  >
+                    <LocateFixed className="h-4 w-4" />
+                  </button>
+                </div>
+                <div>
+                  <button onClick={handleUseSB} className="flex-shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-accent transition-colors" title="Santa Barbara">🪂 Santa Barbara</button>
+                </div>
+                {error && <p className="text-sm text-destructive">{error}</p>}
+              </div>
+
+              <div className="mt-4">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">Forecast Models</h2>
+                <div className="flex flex-wrap gap-3">
+                  {(Object.entries(MODELS) as [ModelKey, { label: string; shortLabel: string }][]).map(([key, cfg]) => {
+                    const checked = selectedModels.has(key);
+                    const loading = loadingModels.has(key);
+                    const hasError = !!modelErrors[key];
+                    return (
+                      <label
+                        key={key}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors select-none ${checked ? "border-transparent" : "border-border bg-background hover:bg-accent"}`}
+                        style={checked ? { background: MODEL_COLORS[key] + "18", borderColor: MODEL_COLORS[key] + "66" } : {}}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => toggleModel(key, e.target.checked)}
+                          className="sr-only"
+                        />
+                        <span
+                          className="w-3 h-3 rounded-sm border-2 flex items-center justify-center flex-shrink-0"
+                          style={{ borderColor: MODEL_COLORS[key], background: checked ? MODEL_COLORS[key] : "transparent" }}
+                        >
+                          {checked && <svg className="w-2 h-2 text-white" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                        </span>
+                        <span className="text-sm font-medium" style={checked ? { color: MODEL_COLORS[key] } : {}}>{cfg.label}</span>
+                        {loading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin opacity-60" style={{ color: MODEL_COLORS[key] }} />}
+                        {hasError && <span className="text-destructive text-xs">!</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+                {Object.entries(modelErrors).map(([m, err]) => (
+                  <p key={m} className="mt-1 text-xs text-destructive">{MODELS[m as ModelKey]?.label}: {err}</p>
+                ))}
+              </div>
             </div>
-            {Object.entries(modelErrors).map(([m, err]) => (
-              <p key={m} className="mt-1 text-xs text-destructive">{MODELS[m as ModelKey]?.label}: {err}</p>
-            ))}
           </div>
         </div>
 

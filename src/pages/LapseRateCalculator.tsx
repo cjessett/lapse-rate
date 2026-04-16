@@ -298,15 +298,9 @@ export default function LapseRateCalculator() {
   }, [loadLocation]);
 
   const handleUseSB = useCallback(async () => {
-    setError(null);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const latitude = 34.4811;
-        const longitude = -119.6845;
-        await loadLocation(latitude, longitude, "Santa Barbara", `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
-      },
-      () => { setError("Could not get your location. Please search for a place."); }
-    );
+    const latitude = 34.4811;
+    const longitude = -119.6845;
+    await loadLocation(latitude, longitude, "Santa Barbara", `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
   }, [loadLocation]);
 
   const isLoading = loadingModels.size > 0;
@@ -329,7 +323,7 @@ export default function LapseRateCalculator() {
 
   // Build day-group headers and clickable time marks from daylightIndices
 const KEY_HOURS = [8, 10, 12, 14, 16, 18];
-const todayStr = new Date().toISOString().substring(0, 10);
+const todayStr = new Date().toLocaleDateString().substring(0, 10);
 const dayGroups: { date: string; label: string; startPos: number; count: number }[] = [];
 const timeMarks: { sliderPos: number; label: string }[] = [];
 if (primaryForecast) {
@@ -341,6 +335,7 @@ if (primaryForecast) {
     if (date !== curDay) {
       curDay = date;
       const diff = Math.round((new Date(date).getTime() - new Date(todayStr).getTime()) / 86400000);
+      // {debugger}
       const label = diff === 0 ? "Today" : diff === 1 ? "Tomorrow"
         : new Date(date + "T12:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
       dayGroups.push({ date, label, startPos: sp, count: 0 });

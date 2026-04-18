@@ -549,19 +549,21 @@ if (primaryForecast) {
 
       <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
         {/* Location + Model Selection */}
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <div className="flex items-center justify-between">
+        <div className="rounded-xl border border-border bg-card px-5 py-3 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setIsLocationSearchOpen((prev) => !prev)}
+            className={`-mx-4 flex w-[calc(100%+2rem)] items-center justify-between px-4 pb-3 text-left transition-colors hover:bg-muted/30 ${
+              (!currentLocation || isLocationSearchOpen) ? "border-b border-border/60" : "pb-0"
+            }`}
+            title={isLocationSearchOpen ? "Collapse location controls" : "Expand location controls"}
+            aria-label={isLocationSearchOpen ? "Collapse location controls" : "Expand location controls"}
+          >
             <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Location + Models</span>
-            <button
-              type="button"
-              onClick={() => setIsLocationSearchOpen((prev) => !prev)}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background hover:bg-accent transition-colors"
-              title={isLocationSearchOpen ? "Collapse location controls" : "Expand location controls"}
-              aria-label={isLocationSearchOpen ? "Collapse location controls" : "Expand location controls"}
-            >
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background transition-colors hover:bg-accent">
               <ChevronDown className={`h-4 w-4 transition-transform ${isLocationSearchOpen ? "rotate-180" : ""}`} />
-            </button>
-          </div>
+            </span>
+          </button>
 
           <div
             className={`grid overflow-hidden transition-all duration-300 ease-in-out ${

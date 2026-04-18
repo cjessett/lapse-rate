@@ -1,10 +1,11 @@
 
 import { useState, useCallback, useRef } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, LocateFixed } from "lucide-react";
+
 import {
   LineChart, Line, ScatterChart, Scatter,
   XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, Legend,
+  ResponsiveContainer, ReferenceLine, Legend, Customized,
 } from "recharts";
 import {
   fetchForecast, geocodeLocation, categorizeLapseRate, formatLocalTime,
@@ -17,6 +18,122 @@ import { AreaForecastDiscussion, fetchAreaForecastDiscussion } from "@/lib/nws";
 
 function cToF(c: number) { return c * 9 / 5 + 32; }
 function lrToF(lrCperKm: number) { return lrCperKm * 1.8 / FT_PER_METER; }
+function kmhToMph(kmh: number) { return kmh * 0.621371; }
+function kmhToKnots(kmh: number) { return kmh * 0.539957; }
+function roundToNearest500(value: number) { return Math.round(value / 500) * 500; }
+function cardinalFromDegrees(deg: number) {
+  const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  return dirs[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+}
+
+function WindBarb({
+  x,
+  y,
+  speedKmh,
+  directionDeg,
+  color,
+}: {
+  x: number;
+  y: number;
+  speedKmh: number;
+  directionDeg: number;
+  color: string;
+}) {
+  const speedKt = Math.max(0, kmhToKnots(speedKmh));
+  let remaining = Math.round(speedKt / 5) * 5;
+  const shaftLength = 22;
+  const step = 4;
+  const barbLength = 10;
+  const children: JSX.Element[] = [
+    <line key="shaft" x1="0" y1="0" x2="0" y2={-shaftLength} stroke={color} strokeWidth="1.5" strokeLinecap="round" />,
+  ];
+
+  let cursor = -shaftLength;
+  let key = 0;
+
+  while (remaining >= 50) {
+    children.push(
+      <polygon
+        key={`flag-${key++}`}
+        points={`0,${cursor} 10,${cursor + 3} 0,${cursor + 6}`}
+        fill={color}
+      />,
+    );
+    remaining -= 50;
+    cursor += 6;
+  }
+
+  while (remaining >= 10) {
+    children.push(
+      <line
+        key={`full-${key++}`}
+        x1="0"
+        y1={cursor}
+        x2={barbLength}
+        y2={cursor - 4}
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />,
+    );
+    remaining -= 10;
+    cursor += step;
+  }
+
+  if (remaining >= 5) {
+    children.push(
+      <line
+        key={`half-${key++}`}
+        x1="0"
+        y1={cursor}
+        x2={barbLength * 0.6}
+        y2={cursor - 2.5}
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />,
+    );
+  }
+
+  return (
+    <g transform={`translate(${x}, ${y}) rotate(${directionDeg})`}>
+      {children}
+    </g>
+  );
+}
+
+interface WindBarbLayerProps {
+  offset?: { left: number; top: number; width: number; height: number };
+  yAxisMap?: Record<string | number, { scale: (value: number) => number }>;
+  points: ProfilePoint[];
+  color: string;
+  xOffset?: number;
+}
+
+function WindBarbLayer({ offset, yAxisMap, points, color, xOffset = 0 }: WindBarbLayerProps) {
+  if (!offset || !yAxisMap) return null;
+  const firstYAxis = Object.values(yAxisMap)[0];
+  if (!firstYAxis) return null;
+  const x = offset.left + offset.width - 14 + xOffset;
+  const yLift = 15
+
+  return (
+    <g>
+      {points
+        .filter((point) => point.windSpeed != null && point.windDirection != null)
+        .map((point) => (
+          <WindBarb
+            key={`${point.label}-${point.heightFt}`}
+            x={x}
+            y={firstYAxis.scale(point.heightFt) - yLift}
+            speedKmh={point.windSpeed!}
+            directionDeg={point.windDirection!}
+            color={color}
+          />
+        ))}
+    </g>
+  );
+}
 
 // ─── GPS helper ────────────────────────────────────────────────────────────────
 
@@ -65,7 +182,13 @@ function LapseRateGauge({ lrKm, fahrenheit }: { lrKm: number; fahrenheit: boolea
   );
 }
 
-interface ProfilePoint { heightFt: number; temp: number; label: string; }
+interface ProfilePoint {
+  heightFt: number;
+  temp: number;
+  label: string;
+  windSpeed?: number;
+  windDirection?: number;
+}
 
 function TemperatureProfileChart({
   forecasts, selectedModels, selectedHourIndex, elevationM, fahrenheit,
@@ -89,11 +212,17 @@ function TemperatureProfileChart({
           heightFt: Math.round(l.geopotentialHeight * FT_PER_METER),
           temp: convert(l.temperature),
           label: `${l.level} hPa`,
+          windSpeed: l.windSpeed,
+          windDirection: l.windDirection,
         })),
       ].sort((a, b) => a.heightFt - b.heightFt);
       return { model, points: pts };
     })
     .filter((x): x is { model: ModelKey; points: ProfilePoint[] } => x !== null);
+
+  const allTemps = modelPoints.flatMap(({ points }) => points.map((point) => point.temp));
+  const warmEdge = allTemps.length > 0 ? Math.max(...allTemps) : undefined;
+  const xDomain: [number | "auto", number | "auto"] = ["auto", warmEdge != null ? warmEdge + 6 : "auto"];
 
   const freezingX = fahrenheit ? 32 : 0;
 
@@ -103,7 +232,10 @@ function TemperatureProfileChart({
       <div className="rounded-lg border border-border bg-card p-2 text-xs shadow-lg space-y-1">
         <p className="font-semibold text-foreground mb-1">{payload[0].payload.heightFt.toLocaleString()} ft MSL</p>
         {payload.map((p, i) => (
-          <p key={i} style={{ color: p.fill }}>{p.payload.label}: {p.payload.temp}{unit}</p>
+          <p key={i} style={{ color: p.fill }}>
+            {p.payload.label}: {p.payload.temp}{unit}
+            {p.payload.windSpeed != null && p.payload.windDirection != null ? ` · ${Math.round(kmhToMph(p.payload.windSpeed))} mph ${cardinalFromDegrees(p.payload.windDirection)}` : ""}
+          </p>
         ))}
       </div>
     );
@@ -117,7 +249,7 @@ function TemperatureProfileChart({
           type="number"
           dataKey="temp"
           name="Temperature"
-          domain={["auto", "auto"]}
+          domain={xDomain}
           tickFormatter={(v) => `${v}${unit}`}
           tick={{ fontSize: 11 }}
           stroke="hsl(var(--muted-foreground))"
@@ -150,6 +282,12 @@ function TemperatureProfileChart({
             fill={MODEL_COLORS[model]}
             line={{ stroke: MODEL_COLORS[model], strokeWidth: 2.5 }}
             lineType="joint"
+          />
+        ))}
+        {modelPoints.map(({ model, points }, index) => (
+          <Customized
+            key={`${model}-wind-barbs`}
+            component={<WindBarbLayer points={points} color={MODEL_COLORS[model]} xOffset={-index * 14} />}
           />
         ))}
       </ScatterChart>
@@ -218,6 +356,7 @@ export default function LapseRateCalculator() {
   const [geoResults, setGeoResults] = useState<GeoResult[]>([]);
   const [coordsFromQuery, setCoordsFromQuery] = useState<{ lat: number; lon: number } | null>(null);
   const [currentLocation, setCurrentLocation] = useState<{ name: string; lat: number; lon: number } | null>(null);
+  const [isLocationSearchOpen, setIsLocationSearchOpen] = useState(true);
   const [selectedModels, setSelectedModels] = useState<Set<ModelKey>>(new Set([DEFAULT_MODEL]));
   const [forecasts, setForecasts] = useState<Partial<Record<ModelKey, ForecastResult>>>({});
   const [loadingModels, setLoadingModels] = useState<Set<ModelKey>>(new Set());
@@ -256,6 +395,7 @@ export default function LapseRateCalculator() {
     setModelErrors({});
     setCurrentLocation({ name, lat, lon });
     setQuery(displayQuery);
+    setIsLocationSearchOpen(false);
     setSliderPos(4);
     setAfd(null);
     setAfdError(null);
@@ -340,7 +480,7 @@ export default function LapseRateCalculator() {
   const daylightIndices: number[] = primaryForecast
     ? primaryForecast.hourlyData.reduce<number[]>((acc, d, i) => {
         const h = parseInt(d.time.substring(11, 13), 10);
-        if (h >= 8 && h <= 19) acc.push(i);
+        if (h >= 8 && h <= 17) acc.push(i);
         return acc;
       }, [])
     : [];
@@ -378,6 +518,7 @@ if (primaryForecast) {
   const lrUnit = fahrenheit ? "°F/1000ft" : "°C/km";
   const displayTemp = (c: number) => fahrenheit ? cToF(c).toFixed(1) : c.toFixed(1);
   const displayLr = (lrKm: number) => (fahrenheit ? lrToF(lrKm) : lrKm).toFixed(2);
+  const displayWind = (speed: number, direction: number) => `${Math.round(kmhToMph(speed))} mph ${cardinalFromDegrees(direction)} (${Math.round(direction)}°)`;
 
   const hasAnyForecast = Object.keys(forecasts).length > 0;
   const elevation = primaryForecast?.elevation ?? 0;
@@ -408,86 +549,115 @@ if (primaryForecast) {
 
       <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
         {/* Location + Model Selection */}
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-4">
-          <div>
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Location</h2>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(e) => handleQueryChange(e.target.value)}
-                  onFocus={() => (geoResults.length > 0 || coordsFromQuery) && setShowDropdown(true)}
-                  onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
-                  placeholder="City name or lat, lon (e.g. 34.448, -119.293)…"
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                {geocoding && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">…</span>}
-                {showDropdown && (coordsFromQuery || geoResults.length > 0) && (
-                  <ul className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
-                    {coordsFromQuery && (
-                      <li
-                        onMouseDown={() => loadLocation(coordsFromQuery.lat, coordsFromQuery.lon, `${coordsFromQuery.lat.toFixed(4)}, ${coordsFromQuery.lon.toFixed(4)}`, `${coordsFromQuery.lat.toFixed(4)}, ${coordsFromQuery.lon.toFixed(4)}`)}
-                        className="px-3 py-2.5 text-sm cursor-pointer hover:bg-accent transition-colors flex items-center gap-2"
-                      >
-                        <span className="text-primary font-mono text-xs bg-primary/10 px-1.5 py-0.5 rounded">GPS</span>
-                        <span><span className="font-medium">{coordsFromQuery.lat.toFixed(4)}</span><span className="text-muted-foreground">, </span><span className="font-medium">{coordsFromQuery.lon.toFixed(4)}</span></span>
-                      </li>
-                    )}
-                    {geoResults.map((r, i) => (
-                      <li key={i} onMouseDown={() => loadLocation(r.latitude, r.longitude, r.name, `${r.name}${r.admin1 ? `, ${r.admin1}` : ""}, ${r.country}`)} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent transition-colors">
-                        <span className="font-medium">{r.name}</span>
-                        {r.admin1 && <span className="text-muted-foreground">, {r.admin1}</span>}
-                        <span className="text-muted-foreground">, {r.country}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              <button onClick={handleUseMyLocation} className="flex-shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-accent transition-colors" title="Use my location">📍 My Location</button>
-            </div>
-            <div>
-              <button onClick={handleUseSB} className="mt-2 flex-shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-accent transition-colors" title="Santa Barbara">🪂 Santa Barbara</button>
-            </div>
-            {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Location + Models</span>
+            <button
+              type="button"
+              onClick={() => setIsLocationSearchOpen((prev) => !prev)}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background hover:bg-accent transition-colors"
+              title={isLocationSearchOpen ? "Collapse location controls" : "Expand location controls"}
+              aria-label={isLocationSearchOpen ? "Collapse location controls" : "Expand location controls"}
+            >
+              <ChevronDown className={`h-4 w-4 transition-transform ${isLocationSearchOpen ? "rotate-180" : ""}`} />
+            </button>
           </div>
 
-          {/* Model checkboxes */}
-          <div>
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">Forecast Models</h2>
-            <div className="flex flex-wrap gap-3">
-              {(Object.entries(MODELS) as [ModelKey, { label: string; shortLabel: string }][]).map(([key, cfg]) => {
-                const checked = selectedModels.has(key);
-                const loading = loadingModels.has(key);
-                const hasError = !!modelErrors[key];
-                return (
-                  <label
-                    key={key}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors select-none ${checked ? "border-transparent" : "border-border bg-background hover:bg-accent"}`}
-                    style={checked ? { background: MODEL_COLORS[key] + "18", borderColor: MODEL_COLORS[key] + "66" } : {}}
-                  >
+          <div
+            className={`grid overflow-hidden transition-all duration-300 ease-in-out ${
+              currentLocation && !isLocationSearchOpen
+                ? "grid-rows-[0fr] opacity-0 mt-0"
+                : "grid-rows-[1fr] opacity-100 mt-4"
+            }`}
+            aria-hidden={currentLocation && !isLocationSearchOpen}
+          >
+            <div className="min-h-0">
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
                     <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => toggleModel(key, e.target.checked)}
-                      className="sr-only"
+                      type="text"
+                      value={query}
+                      onChange={(e) => handleQueryChange(e.target.value)}
+                      onFocus={() => (geoResults.length > 0 || coordsFromQuery) && setShowDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
+                      placeholder="City name or lat, lon (e.g. 34.448, -119.293)…"
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                     />
-                    <span
-                      className="w-3 h-3 rounded-sm border-2 flex items-center justify-center flex-shrink-0"
-                      style={{ borderColor: MODEL_COLORS[key], background: checked ? MODEL_COLORS[key] : "transparent" }}
-                    >
-                      {checked && <svg className="w-2 h-2 text-white" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                    </span>
-                    <span className="text-sm font-medium" style={checked ? { color: MODEL_COLORS[key] } : {}}>{cfg.label}</span>
-                    {loading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin opacity-60" style={{ color: MODEL_COLORS[key] }} />}
-                    {hasError && <span className="text-destructive text-xs">!</span>}
-                  </label>
-                );
-              })}
+                    {geocoding && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">…</span>}
+                    {showDropdown && (coordsFromQuery || geoResults.length > 0) && (
+                      <ul className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+                        {coordsFromQuery && (
+                          <li
+                            onMouseDown={() => loadLocation(coordsFromQuery.lat, coordsFromQuery.lon, `${coordsFromQuery.lat.toFixed(4)}, ${coordsFromQuery.lon.toFixed(4)}`, `${coordsFromQuery.lat.toFixed(4)}, ${coordsFromQuery.lon.toFixed(4)}`)}
+                            className="px-3 py-2.5 text-sm cursor-pointer hover:bg-accent transition-colors flex items-center gap-2"
+                          >
+                            <span className="text-primary font-mono text-xs bg-primary/10 px-1.5 py-0.5 rounded">GPS</span>
+                            <span><span className="font-medium">{coordsFromQuery.lat.toFixed(4)}</span><span className="text-muted-foreground">, </span><span className="font-medium">{coordsFromQuery.lon.toFixed(4)}</span></span>
+                          </li>
+                        )}
+                        {geoResults.map((r, i) => (
+                          <li key={i} onMouseDown={() => loadLocation(r.latitude, r.longitude, r.name, `${r.name}${r.admin1 ? `, ${r.admin1}` : ""}, ${r.country}`)} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent transition-colors">
+                            <span className="font-medium">{r.name}</span>
+                            {r.admin1 && <span className="text-muted-foreground">, {r.admin1}</span>}
+                            <span className="text-muted-foreground">, {r.country}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleUseMyLocation}
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-border bg-background hover:bg-accent transition-colors"
+                    title="Use my location"
+                    aria-label="Use my location"
+                  >
+                    <LocateFixed className="h-4 w-4" />
+                  </button>
+                </div>
+                <div>
+                  <button onClick={handleUseSB} className="flex-shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-accent transition-colors" title="Santa Barbara">🪂 Santa Barbara</button>
+                </div>
+                {error && <p className="text-sm text-destructive">{error}</p>}
+              </div>
+
+              <div className="mt-4">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">Forecast Models</h2>
+                <div className="flex flex-wrap gap-3">
+                  {(Object.entries(MODELS) as [ModelKey, { label: string; shortLabel: string }][]).map(([key, cfg]) => {
+                    const checked = selectedModels.has(key);
+                    const loading = loadingModels.has(key);
+                    const hasError = !!modelErrors[key];
+                    return (
+                      <label
+                        key={key}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors select-none ${checked ? "border-transparent" : "border-border bg-background hover:bg-accent"}`}
+                        style={checked ? { background: MODEL_COLORS[key] + "18", borderColor: MODEL_COLORS[key] + "66" } : {}}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => toggleModel(key, e.target.checked)}
+                          className="sr-only"
+                        />
+                        <span
+                          className="w-3 h-3 rounded-sm border-2 flex items-center justify-center flex-shrink-0"
+                          style={{ borderColor: MODEL_COLORS[key], background: checked ? MODEL_COLORS[key] : "transparent" }}
+                        >
+                          {checked && <svg className="w-2 h-2 text-white" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                        </span>
+                        <span className="text-sm font-medium" style={checked ? { color: MODEL_COLORS[key] } : {}}>{cfg.label}</span>
+                        {loading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin opacity-60" style={{ color: MODEL_COLORS[key] }} />}
+                        {hasError && <span className="text-destructive text-xs">!</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+                {Object.entries(modelErrors).map(([m, err]) => (
+                  <p key={m} className="mt-1 text-xs text-destructive">{MODELS[m as ModelKey]?.label}: {err}</p>
+                ))}
+              </div>
             </div>
-            {Object.entries(modelErrors).map(([m, err]) => (
-              <p key={m} className="mt-1 text-xs text-destructive">{MODELS[m as ModelKey]?.label}: {err}</p>
-            ))}
           </div>
         </div>
 
@@ -633,9 +803,8 @@ if (primaryForecast) {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border/40 text-xs text-muted-foreground">
-                        <th className="text-left px-5 py-2 font-medium">From</th>
-                        <th className="text-left px-4 py-2 font-medium">To</th>
-                        <th className="text-right px-4 py-2 font-medium">Mid-Height</th>
+                        <th className="text-left px-5 py-2 font-medium">Layer</th>
+                        <th className="text-left px-4 py-2 font-medium">Wind</th>
                         <th className="text-right px-4 py-2 font-medium">{lrUnit}</th>
                         <th className="text-right px-5 py-2 font-medium hidden sm:table-cell">{fahrenheit ? "°C/km" : "°C/1000ft"}</th>
                         <th className="text-right px-5 py-2 font-medium">Category</th>
@@ -645,25 +814,25 @@ if (primaryForecast) {
                       {[
                         currentEntry.lapseRates[0]
                           ? {
-                              from: "Surface (2m)",
-                              to: `${currentEntry.layers[0]?.level ?? "—"} hPa`,
+                              layer: "Surface",
+                              wind: currentEntry.layers[0] ? displayWind(currentEntry.layers[0].windSpeed, currentEntry.layers[0].windDirection) : "—",
                               lrKm: currentEntry.lapseRates[0].lapseRateCperKm,
-                              midHt: `${Math.round(currentEntry.lapseRates[0].midHeightFt).toLocaleString()} ft`,
                             }
                           : null,
-                        ...currentEntry.lapseRates.slice(1).map((lr) => ({
-                          from: `${lr.fromLevel} hPa`,
-                          to: `${lr.toLevel} hPa`,
-                          lrKm: lr.lapseRateCperKm,
-                          midHt: `${Math.round(lr.midHeightFt).toLocaleString()} ft`,
-                        })),
-                      ].filter(Boolean).map((row, i) => {
+                        ...currentEntry.lapseRates.slice(1).map((lr, idx) => {
+                          const upperLayer = currentEntry.layers[idx + 1];
+                          return {
+                            layer: `${roundToNearest500(lr.midHeightFt).toLocaleString()} ft`,
+                            wind: upperLayer ? displayWind(upperLayer.windSpeed, upperLayer.windDirection) : "—",
+                            lrKm: lr.lapseRateCperKm,
+                          };
+                        }),
+                      ].filter(Boolean).reverse().map((row, i) => {
                         const cat = categorizeLapseRate(row!.lrKm);
                         return (
                           <tr key={i} className="border-b border-border/20 last:border-0 hover:bg-muted/30 transition-colors">
-                            <td className="px-5 py-2.5 text-muted-foreground">{row!.from}</td>
-                            <td className="px-4 py-2.5 text-muted-foreground">{row!.to}</td>
-                            <td className="px-4 py-2.5 text-right tabular-nums">{row!.midHt}</td>
+                            <td className="px-5 py-2.5 text-muted-foreground">{row!.layer}</td>
+                            <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">{row!.wind}</td>
                             <td className="px-4 py-2.5 text-right tabular-nums font-medium">{displayLr(row!.lrKm)}</td>
                             <td className="px-5 py-2.5 text-right tabular-nums text-muted-foreground hidden sm:table-cell">{fahrenheit ? row!.lrKm.toFixed(2) : (row!.lrKm / FT_PER_METER).toFixed(2)}</td>
                             <td className="px-5 py-2.5 text-right">

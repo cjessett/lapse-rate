@@ -501,7 +501,7 @@ if (primaryForecast) {
     if (date !== curDay) {
       curDay = date;
       const diff = Math.round((new Date(date).getTime() - new Date(todayStr).getTime()) / 86400000);
-      // {debugger}
+
       const label = diff === 0 ? "Today" : diff === 1 ? "Tomorrow"
         : new Date(date + "T12:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
       dayGroups.push({ date, label, startPos: sp, count: 0 });
@@ -672,6 +672,60 @@ if (primaryForecast) {
 
         {hasAnyForecast && currentEntry && (
           <>
+
+            {/* AFD */}
+            {(currentLocation && (afdLoading || afdError || afdSections.length > 0)) && (
+              <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setIsAfdOpen((prev) => !prev)}
+                  className="flex w-full items-center justify-between px-5 py-3 text-left hover:bg-muted/30 transition-colors"
+                >
+                  <div>
+                    <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Area Forecast Discussion</h2>
+                    <p className="text-sm text-foreground">
+                      {afd ? `${afd.officeName} (${afd.officeId})` : "Nearest NWS office"}
+                    </p>
+                    {afd?.issuedAt && (
+                      <p className="text-xs text-muted-foreground">
+                        Issued {new Date(afd.issuedAt).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}
+                      </p>
+                    )}
+                  </div>
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background hover:bg-accent transition-colors">
+                    <ChevronDown className={`h-4 w-4 transition-transform ${isAfdOpen ? "rotate-180" : ""}`} />
+                  </span>
+                </button>
+                <div
+                  className={`grid overflow-hidden transition-all duration-400 ease-in-out ${isAfdOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
+                  aria-hidden={!isAfdOpen}
+                >
+                  <div className="min-h-0">
+                    <div className="border-t border-border/60 px-5 py-4 space-y-4">
+                      {afdLoading && <p className="text-sm text-muted-foreground">Loading latest discussion from the nearest NWS office…</p>}
+                      {afdError && <p className="text-sm text-destructive">{afdError}</p>}
+                      {!afdLoading && !afdError && afdSections.length === 0 && (
+                        <p className="text-sm text-muted-foreground">The latest AFD did not include synopsis, short term, or long term sections.</p>
+                      )}
+                      {afdSections.map((section) => (
+                        <section key={section.title} className="space-y-1.5">
+                          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{section.title}</h3>
+                          <div className="text-sm leading-6 whitespace-pre-line text-foreground">
+                            {section.body}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Time selector */}
             <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-3">
               {/* Header row */}
@@ -843,56 +897,6 @@ if (primaryForecast) {
                       })}
                     </tbody>
                   </table>
-                </div>
-              </div>
-            )}
-
-            {(currentLocation && (afdLoading || afdError || afdSections.length > 0)) && (
-              <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setIsAfdOpen((prev) => !prev)}
-                  className="flex w-full items-center justify-between px-5 py-3 text-left hover:bg-muted/30 transition-colors"
-                >
-                  <div>
-                    <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Area Forecast Discussion</h2>
-                    <p className="text-sm text-foreground">
-                      {afd ? `${afd.officeName} (${afd.officeId})` : "Nearest NWS office"}
-                    </p>
-                    {afd?.issuedAt && (
-                      <p className="text-xs text-muted-foreground">
-                        Issued {new Date(afd.issuedAt).toLocaleString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
-                      </p>
-                    )}
-                  </div>
-                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isAfdOpen ? "rotate-180" : ""}`} />
-                </button>
-                <div
-                  className={`grid overflow-hidden transition-all duration-300 ease-in-out ${isAfdOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
-                  aria-hidden={!isAfdOpen}
-                >
-                  <div className="min-h-0">
-                    <div className="border-t border-border/60 px-5 py-4 space-y-4">
-                      {afdLoading && <p className="text-sm text-muted-foreground">Loading latest discussion from the nearest NWS office…</p>}
-                      {afdError && <p className="text-sm text-destructive">{afdError}</p>}
-                      {!afdLoading && !afdError && afdSections.length === 0 && (
-                        <p className="text-sm text-muted-foreground">The latest AFD did not include synopsis, short term, or long term sections.</p>
-                      )}
-                      {afdSections.map((section) => (
-                        <section key={section.title} className="space-y-1.5">
-                          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{section.title}</h3>
-                          <div className="text-sm leading-6 whitespace-pre-line text-foreground">
-                            {section.body}
-                          </div>
-                        </section>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               </div>
             )}

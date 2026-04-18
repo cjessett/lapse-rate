@@ -9,10 +9,11 @@ import {
 } from "recharts";
 import {
   fetchForecast, geocodeLocation, categorizeLapseRate, formatLocalTime,
-  ForecastResult, LapseRateResult, FT_PER_METER,
+  ForecastResult, FT_PER_METER,
   MODELS, MODEL_COLORS, ModelKey, DEFAULT_MODEL,
 } from "@/lib/openmeteo";
 import { AreaForecastDiscussion, fetchAreaForecastDiscussion } from "@/lib/nws";
+import { SAVED_SITES, SavedSite } from "@/lib/sites";
 
 // ─── unit helpers ──────────────────────────────────────────────────────────────
 
@@ -156,6 +157,19 @@ function UnitToggle({ fahrenheit, onChange }: { fahrenheit: boolean; onChange: (
       <button onClick={() => onChange(true)} className={`px-3 py-1.5 transition-colors ${fahrenheit ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>°F</button>
       <button onClick={() => onChange(false)} className={`px-3 py-1.5 transition-colors ${!fahrenheit ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>°C</button>
     </div>
+  );
+}
+
+function SiteButton({ site, onSelect }: { site: SavedSite; onSelect: (site: SavedSite) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(site)}
+      className="flex-shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-accent transition-colors"
+      title={site.label}
+    >
+      🪂 {site.label}
+    </button>
   );
 }
 
@@ -463,10 +477,8 @@ export default function LapseRateCalculator() {
     );
   }, [loadLocation]);
 
-  const handleUseSB = useCallback(async () => {
-    const latitude = 34.4811;
-    const longitude = -119.6845;
-    await loadLocation(latitude, longitude, "Santa Barbara", `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+  const handleSelectSite = useCallback(async (site: SavedSite) => {
+    await loadLocation(site.lat, site.lon, site.label, `${site.lat.toFixed(4)}, ${site.lon.toFixed(4)}`);
   }, [loadLocation]);
 
   const isLoading = loadingModels.size > 0;
@@ -615,8 +627,10 @@ if (primaryForecast) {
                     <LocateFixed className="h-4 w-4" />
                   </button>
                 </div>
-                <div>
-                  <button onClick={handleUseSB} className="flex-shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-accent transition-colors" title="Santa Barbara">🪂 Santa Barbara</button>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(SAVED_SITES).map(([siteId, site]) => (
+                    <SiteButton key={siteId} site={site} onSelect={handleSelectSite} />
+                  ))}
                 </div>
                 {error && <p className="text-sm text-destructive">{error}</p>}
               </div>
@@ -786,7 +800,7 @@ if (primaryForecast) {
               </div>
 
               <p className="text-xs text-muted-foreground text-center">
-                {currentLocation?.name} · {elevation.toFixed(0)} m elev · 8 AM – 7 PM local time
+                {currentLocation?.name} · {(elevation * FT_PER_METER).toFixed(0)} ft elev · 8 AM – 7 PM local time
               </p>
             </div>
 

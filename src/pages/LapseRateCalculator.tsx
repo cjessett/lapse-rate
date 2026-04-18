@@ -1,5 +1,6 @@
 
 import { useState, useCallback, useRef } from "react";
+import { ChevronDown } from "lucide-react";
 import {
   LineChart, Line, ScatterChart, Scatter,
   XAxis, YAxis, CartesianGrid, Tooltip,
@@ -10,6 +11,7 @@ import {
   ForecastResult, LapseRateResult, FT_PER_METER,
   MODELS, MODEL_COLORS, ModelKey, DEFAULT_MODEL,
 } from "@/lib/openmeteo";
+import { AreaForecastDiscussion, fetchAreaForecastDiscussion } from "@/lib/nws";
 
 // ─── unit helpers ──────────────────────────────────────────────────────────────
 
@@ -225,7 +227,12 @@ export default function LapseRateCalculator() {
   const [error, setError] = useState<string | null>(null);
   const [showDropdown, setShowDropdown] = useState(false);
   const [fahrenheit, setFahrenheit] = useState(true);
+  const [afd, setAfd] = useState<AreaForecastDiscussion | null>(null);
+  const [afdError, setAfdError] = useState<string | null>(null);
+  const [afdLoading, setAfdLoading] = useState(false);
+  const [isAfdOpen, setIsAfdOpen] = useState(false);
   const geocodeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const afdRequestId = useRef(0);
 
   const fetchModel = useCallback(async (lat: number, lon: number, model: ModelKey) => {
     setLoadingModels((prev) => new Set([...prev, model]));
@@ -250,9 +257,28 @@ export default function LapseRateCalculator() {
     setCurrentLocation({ name, lat, lon });
     setQuery(displayQuery);
     setSliderPos(4);
+    setAfd(null);
+    setAfdError(null);
+    setAfdLoading(true);
+    setIsAfdOpen(false);
+    afdRequestId.current += 1;
+    const requestId = afdRequestId.current;
     // Fetch all currently selected models in parallel
     const models = Array.from(selectedModels);
     models.forEach((m) => fetchModel(lat, lon, m));
+    fetchAreaForecastDiscussion(lat, lon)
+      .then((discussion) => {
+        if (requestId === afdRequestId.current) setAfd(discussion);
+      })
+      .catch((e: unknown) => {
+        if (requestId === afdRequestId.current) {
+          console.log('error', e)
+          setAfdError(e instanceof Error ? e.message : "Failed to load Area Forecast Discussion");
+        }
+      })
+      .finally(() => {
+        if (requestId === afdRequestId.current) setAfdLoading(false);
+      });
   }, [selectedModels, fetchModel]);
 
   const toggleModel = useCallback((model: ModelKey, checked: boolean) => {
@@ -355,6 +381,14 @@ if (primaryForecast) {
 
   const hasAnyForecast = Object.keys(forecasts).length > 0;
   const elevation = primaryForecast?.elevation ?? 0;
+  const afdSections = afd
+    ? [
+        { title: "Synopsis", body: afd.synopsis },
+        { title: "Short Term", body: afd.shortTerm },
+        { title: "Long Term", body: afd.longTerm },
+        { title: "Discussion", body: afd.discussion },
+      ].filter((section): section is { title: string; body: string } => !!section.body)
+    : [];
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -640,6 +674,56 @@ if (primaryForecast) {
                       })}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+
+            {(currentLocation && (afdLoading || afdError || afdSections.length > 0)) && (
+              <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setIsAfdOpen((prev) => !prev)}
+                  className="flex w-full items-center justify-between px-5 py-3 text-left hover:bg-muted/30 transition-colors"
+                >
+                  <div>
+                    <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Area Forecast Discussion</h2>
+                    <p className="text-sm text-foreground">
+                      {afd ? `${afd.officeName} (${afd.officeId})` : "Nearest NWS office"}
+                    </p>
+                    {afd?.issuedAt && (
+                      <p className="text-xs text-muted-foreground">
+                        Issued {new Date(afd.issuedAt).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}
+                      </p>
+                    )}
+                  </div>
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isAfdOpen ? "rotate-180" : ""}`} />
+                </button>
+                <div
+                  className={`grid overflow-hidden transition-all duration-300 ease-in-out ${isAfdOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
+                  aria-hidden={!isAfdOpen}
+                >
+                  <div className="min-h-0">
+                    <div className="border-t border-border/60 px-5 py-4 space-y-4">
+                      {afdLoading && <p className="text-sm text-muted-foreground">Loading latest discussion from the nearest NWS office…</p>}
+                      {afdError && <p className="text-sm text-destructive">{afdError}</p>}
+                      {!afdLoading && !afdError && afdSections.length === 0 && (
+                        <p className="text-sm text-muted-foreground">The latest AFD did not include synopsis, short term, or long term sections.</p>
+                      )}
+                      {afdSections.map((section) => (
+                        <section key={section.title} className="space-y-1.5">
+                          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{section.title}</h3>
+                          <div className="text-sm leading-6 whitespace-pre-line text-foreground">
+                            {section.body}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
